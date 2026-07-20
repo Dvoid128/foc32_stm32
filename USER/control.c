@@ -21,20 +21,20 @@ volatile uint16_t Gimbal_Joint2_Target_Angle = 0;
 volatile u16 Vision_Fps = 0;
 volatile u8 Vision_Online = 0;
 /* 视觉误差方向、死区、限幅以及可调参数步进。 */
-#define VISION_DIR_X              -1.0f  /* 图像 X 误差到偏航输出的方向符号，方向反时只改这里。 */
-#define VISION_DIR_Y              -1.0f  /* 图像 Y 误差到俯仰输出的方向符号，方向反时只改这里。 */
-#define VISION_DEADZONE            3.0f  /* 目标中心附近的像素死区，用来抑制小幅抖动。 */
-#define VISION_LOST_TICKS          40    /* 视觉连续丢帧计数阈值，超过后清空视觉 PD 输出。 */
-#define VISION_YAW_LIMIT_RPM       30.0f /* 视觉偏航 PD 输出限幅，尚未叠加 IMU 补偿。 */
-#define VISION_PITCH_LIMIT_RPM     10.0f /* 视觉俯仰 PD 输出限幅。 */
+#define VISION_DIR_X -1.0f				  /* 图像 X 误差到偏航输出的方向符号，方向反时只改这里。 */
+#define VISION_DIR_Y -1.0f				  /* 图像 Y 误差到俯仰输出的方向符号，方向反时只改这里。 */
+#define VISION_DEADZONE 3.0f			  /* 目标中心附近的像素死区，用来抑制小幅抖动。 */
+#define VISION_LOST_TICKS 40			  /* 视觉连续丢帧计数阈值，超过后清空视觉 PD 输出。 */
+#define VISION_YAW_LIMIT_RPM 30.0f		  /* 视觉偏航 PD 输出限幅，尚未叠加 IMU 补偿。 */
+#define VISION_PITCH_LIMIT_RPM 10.0f	  /* 视觉俯仰 PD 输出限幅。 */
 #define VISION_PITCH_STEP_LIMIT_X10 10.0f /* 俯仰角度每周期累加步进限幅，写入目标角前先限制。 */
-#define GIMBAL_YAW_COMP_LIMIT_RPM  35.0f /* IMU z 轴角速度折算偏航补偿的限幅。 */
-#define GIMBAL_YAW_LIMIT_RPM       100.0f /* 下发到云台一轴的最终偏航速度限幅。 */
-#define VISION_FPS_SAMPLE_TICKS    200   /* 帧率统计窗口，200 个 5ms 周期约为 1 秒。 */
+#define GIMBAL_YAW_COMP_LIMIT_RPM 35.0f	  /* IMU z 轴角速度折算偏航补偿的限幅。 */
+#define GIMBAL_YAW_LIMIT_RPM 100.0f		  /* 下发到云台一轴的最终偏航速度限幅。 */
+#define VISION_FPS_SAMPLE_TICKS 200		  /* 帧率统计窗口，200 个 5ms 周期约为 1 秒。 */
 
 /* 当前视觉瞄准中心点固定为视觉模块坐标原点，先去掉路线标定补偿。 */
-int VISION_CENTER_X = -2;
-int VISION_CENTER_Y = 9;
+int VISION_CENTER_X = 0;
+int VISION_CENTER_Y = 0;
 
 /*
  * 视觉 PD 调参说明：
@@ -53,9 +53,9 @@ float KD_VISION_Y = 0.02f; /* Y 轴微分系数：给上下俯仰加阻尼，俯仰过冲或抖动时微
  * 某段目标跟踪偏软、偏慢时增大对应系数；某段云台抖动、抢得太猛或路线变化大时减小。
  * CD_VISION_FF 是 CD 段速度前馈系数，不是 PD 增益，主要用来按车速提前补偿横向偏移。
  */
-float AC_VISION_K = 0.40f;  /* AC 段视觉整体增益：只影响 AC 段，常用于单独压住或增强 AC 段跟踪。 */
-float CD_VISION_K = 0.40f;  /* CD 段视觉整体增益：只影响 CD 段，配合 CD_VISION_FF 一起调。 */
-float DB_VISION_K = 0.40f;  /* DB 段视觉整体增益：只影响 DB 段，方便最后一段单独修正。 */
+float AC_VISION_K = 0.40f; /* AC 段视觉整体增益：只影响 AC 段，常用于单独压住或增强 AC 段跟踪。 */
+float CD_VISION_K = 0.40f; /* CD 段视觉整体增益：只影响 CD 段，配合 CD_VISION_FF 一起调。 */
+float DB_VISION_K = 0.40f; /* DB 段视觉整体增益：只影响 DB 段，方便最后一段单独修正。 */
 float BA_VISION_FF = 0.05f;
 float CD_VISION_FF = 0.045f; /* CD 段偏航速度前馈：车越快补偿越大，CD 段横向总偏一边时重点调它。 */
 
@@ -71,7 +71,6 @@ static float vision_segment_gain = 1.0f;
 static u16 search_scan_ticks = 0;
 static u8 search_target_locked = 0;
 
-
 /* 小工具函数：统一做取绝对值、限幅和浮点四舍五入，避免控制输出越界。 */
 static int abs_int(int value)
 {
@@ -79,20 +78,26 @@ static int abs_int(int value)
 }
 static int limit_int(int value, int max, int min)
 {
-	if(value > max) return max;
-	if(value < min) return min;
+	if (value > max)
+		return max;
+	if (value < min)
+		return min;
 	return value;
 }
 static float limit_float(float value, float max, float min)
 {
-	if(value > max) return max;
-	if(value < min) return min;
+	if (value > max)
+		return max;
+	if (value < min)
+		return min;
 	return value;
 }
 static int float_to_int_round(float value)
 {
-	if(value >= 0.0f) return (int)(value + 0.5f);
-	else              return (int)(value - 0.5f);
+	if (value >= 0.0f)
+		return (int)(value + 0.5f);
+	else
+		return (int)(value - 0.5f);
 }
 static float abs_float(float value)
 {
@@ -107,17 +112,17 @@ static void Vision_Frequency_Update(void)
 	u16 current_frame_count;
 	u16 frame_delta;
 
-	if(g_vision_frame_flag)
+	if (g_vision_frame_flag)
 	{
 		/* 已消费一次视觉新帧标志，清零等待下一帧。 */
 		g_vision_frame_flag = 0;
 	}
 
 	sample_ticks++;
-	if(sample_ticks >= VISION_FPS_SAMPLE_TICKS)
+	if (sample_ticks >= VISION_FPS_SAMPLE_TICKS)
 	{
 		current_frame_count = g_vision_frame_count;
-		if(current_frame_count >= last_frame_count)
+		if (current_frame_count >= last_frame_count)
 		{
 			frame_delta = current_frame_count - last_frame_count;
 		}
@@ -142,7 +147,8 @@ static float Gimbal_GetYawCompRpm(void)
 static uint16_t wrap_single_angle_x10(int32_t angle_x10)
 {
 	angle_x10 %= 3600;
-	if(angle_x10 < 0) angle_x10 += 3600;
+	if (angle_x10 < 0)
+		angle_x10 += 3600;
 	return (uint16_t)angle_x10;
 }
 
@@ -175,7 +181,7 @@ static void Visual_Gimbal_Output(float yaw_rpm, float pitch_rpm)
 
 static void Visual_Gimbal_SearchScan(void)
 {
-	if(search_target_locked)
+	if (search_target_locked)
 	{
 		Visual_Gimbal_Output(0.0f, 0.0f);
 		return;
@@ -183,7 +189,7 @@ static void Visual_Gimbal_SearchScan(void)
 
 	Gimbal_Joint2_Target_Angle = 3480;
 
-	if(search_scan_ticks >= (u16)(CONTROL_FREQUENCY * 5.0f / 2.0f))
+	if (search_scan_ticks >= (u16)(CONTROL_FREQUENCY * 5.0f / 2.0f))
 	{
 		Visual_Gimbal_Output(0.0f, 0.0f);
 		return;
@@ -217,10 +223,11 @@ static void Visual_Gimbal_Process(u8 work_mode)
 	float cmd_yaw;
 	float cmd_pitch;
 
-	if(g_data_ready == 0)
+	if (g_data_ready == 0)
 	{
-		if(vision_lost_ticks < 0xffff) vision_lost_ticks++;
-		if(vision_lost_ticks >= VISION_LOST_TICKS)
+		if (vision_lost_ticks < 0xffff)
+			vision_lost_ticks++;
+		if (vision_lost_ticks >= VISION_LOST_TICKS)
 		{
 			prev_err_x = 0.0f;
 			prev_err_y = 0.0f;
@@ -230,14 +237,14 @@ static void Visual_Gimbal_Process(u8 work_mode)
 			vision_ff_yaw_cmd = 0.0f;
 		}
 
-		if(use_compensation == 0)
+		if (use_compensation == 0)
 		{
 			Visual_Gimbal_SearchScan();
 		}
 		else
 		{
 			Visual_Gimbal_Output(yaw_base_rpm + vision_yaw_cmd + vision_ff_yaw_cmd,
-			                     0.0f);
+								 0.0f);
 		}
 		return;
 	}
@@ -245,9 +252,9 @@ static void Visual_Gimbal_Process(u8 work_mode)
 	g_data_ready = 0;
 	vision_lost_ticks = 0;
 
-	if(g_follow_area == 0)
+	if (g_follow_area == 0)
 	{
-		if(use_compensation == 0)
+		if (use_compensation == 0)
 		{
 			Visual_Gimbal_ClearState();
 			Visual_Gimbal_SearchScan();
@@ -259,7 +266,7 @@ static void Visual_Gimbal_Process(u8 work_mode)
 		return;
 	}
 
-	if(use_compensation == 0)
+	if (use_compensation == 0)
 	{
 		search_target_locked = 1;
 	}
@@ -271,7 +278,7 @@ static void Visual_Gimbal_Process(u8 work_mode)
 
 	err_x = (float)VISION_CENTER_X - (float)g_follow_x;
 	err_y = (float)VISION_CENTER_Y - (float)g_follow_y;
-	if(vision_prev_valid == 0)
+	if (vision_prev_valid == 0)
 	{
 		prev_err_x = err_x;
 		prev_err_y = err_y;
@@ -284,23 +291,25 @@ static void Visual_Gimbal_Process(u8 work_mode)
 	prev_err_y = err_y;
 
 	cmd_yaw = VISION_DIR_X * vision_segment_gain * (KP_VISION_X * err_x + KD_VISION_X * diff_err_x);
-	if(abs_float(err_x) <= VISION_DEADZONE) cmd_yaw = 0.0f;
+	if (abs_float(err_x) <= VISION_DEADZONE)
+		cmd_yaw = 0.0f;
 	vision_yaw_cmd = limit_float(cmd_yaw, VISION_YAW_LIMIT_RPM, -VISION_YAW_LIMIT_RPM);
 
 	cmd_pitch = VISION_DIR_Y * vision_segment_gain * (KP_VISION_Y * err_y + KD_VISION_Y * diff_err_y);
-	if(abs_float(err_y) <= VISION_DEADZONE) cmd_pitch = 0.0f;
+	if (abs_float(err_y) <= VISION_DEADZONE)
+		cmd_pitch = 0.0f;
 	vision_pitch_cmd = limit_float(cmd_pitch, VISION_PITCH_LIMIT_RPM, -VISION_PITCH_LIMIT_RPM);
 
 	Visual_Gimbal_Output(yaw_base_rpm + vision_yaw_cmd +
-	                     (use_compensation ? vision_ff_yaw_cmd : 0.0f),
-	                     vision_pitch_cmd);
+							 (use_compensation ? vision_ff_yaw_cmd : 0.0f),
+						 vision_pitch_cmd);
 }
 /* 根据左右电机目标 PWM 设置方向引脚和占空比，停车时同时关闭 H 桥输入。 */
 void Motor_SetPwm(int motor_left, int motor_right)
 {
 	Motor_Left = limit_int(motor_left, PWM_MAX, -PWM_MAX);
 	Motor_Right = limit_int(motor_right, PWM_MAX, -PWM_MAX);
-	if(Control_Work_Mode == CONTROL_MODE_SEARCH || !Control_Work_Enable)
+	if (Control_Work_Mode == CONTROL_MODE_SEARCH || !Control_Work_Enable)
 	{
 		Motor_Left = 0;
 		Motor_Right = 0;
@@ -312,13 +321,19 @@ void Motor_SetPwm(int motor_left, int motor_right)
 		PWMB = 0;
 		return;
 	}
-	if(Motor_Right > 0)      AIN1 = 1, AIN2 = 0;
-	else if(Motor_Right < 0) AIN1 = 0, AIN2 = 1;
-	else                    AIN1 = 0, AIN2 = 0;
+	if (Motor_Right > 0)
+		AIN1 = 1, AIN2 = 0;
+	else if (Motor_Right < 0)
+		AIN1 = 0, AIN2 = 1;
+	else
+		AIN1 = 0, AIN2 = 0;
 	PWMA = abs_int(Motor_Right);
-	if(Motor_Left > 0)      BIN1 = 1, BIN2 = 0;
-	else if(Motor_Left < 0) BIN1 = 0, BIN2 = 1;
-	else                   BIN1 = 0, BIN2 = 0;
+	if (Motor_Left > 0)
+		BIN1 = 1, BIN2 = 0;
+	else if (Motor_Left < 0)
+		BIN1 = 0, BIN2 = 1;
+	else
+		BIN1 = 0, BIN2 = 0;
 	PWMB = abs_int(Motor_Left);
 }
 
@@ -332,9 +347,9 @@ static void Get_Velocity_From_Encoder(int encoder_left, int encoder_right)
 	encoder_left_pr = (float)OriginalEncoder.A * LEFT_ENCODER_SIGN;
 	encoder_right_pr = (float)OriginalEncoder.B * RIGHT_ENCODER_SIGN;
 	MotorA.Current_Encoder = encoder_left_pr * CONTROL_FREQUENCY * WHEEL_PERIMETER /
-	                         (ENCODER_MULTIPLES * ENCODER_RESOLUTION * MOTOR_GEAR_RATIO);
+							 (ENCODER_MULTIPLES * ENCODER_RESOLUTION * MOTOR_GEAR_RATIO);
 	MotorB.Current_Encoder = encoder_right_pr * CONTROL_FREQUENCY * WHEEL_PERIMETER /
-	                         (ENCODER_MULTIPLES * ENCODER_RESOLUTION * MOTOR_GEAR_RATIO);
+							 (ENCODER_MULTIPLES * ENCODER_RESOLUTION * MOTOR_GEAR_RATIO);
 }
 
 /* 左轮增量式 PI：直接累加 PWM 修正量，停车时清空积分/历史误差。 */
@@ -345,7 +360,7 @@ static int Incremental_PI_Left(float encoder, float target)
 	static float last_bias = 0.0f;
 	bias = target - encoder;
 	pwm += Velocity_KP * (bias - last_bias) + Velocity_KI * bias;
-	if(Control_Work_Mode == CONTROL_MODE_SEARCH || !Control_Work_Enable)
+	if (Control_Work_Mode == CONTROL_MODE_SEARCH || !Control_Work_Enable)
 	{
 		pwm = 0.0f;
 		last_bias = 0.0f;
@@ -363,7 +378,7 @@ static int Incremental_PI_Right(float encoder, float target)
 	static float last_bias = 0.0f;
 	bias = target - encoder;
 	pwm += Velocity_KP * (bias - last_bias) + Velocity_KI * bias;
-	if(Control_Work_Mode == CONTROL_MODE_SEARCH || !Control_Work_Enable)
+	if (Control_Work_Mode == CONTROL_MODE_SEARCH || !Control_Work_Enable)
 	{
 		pwm = 0.0f;
 		last_bias = 0.0f;
@@ -395,7 +410,7 @@ static void Control_StartWork(void)
 static void Control_ToggleWork(void)
 {
 	/* 单击在“当前模式启动”和“当前模式待启动”之间来回切换。 */
-	if(Control_Work_Enable)
+	if (Control_Work_Enable)
 	{
 		Control_StopWork();
 	}
@@ -416,16 +431,16 @@ static void Control_SwitchMode(void)
 void Key_Process(void)
 {
 	u8 key = click_N_Double(50);
-	if(key == 1)
+	if (key == 1)
 	{
 		Control_ToggleWork();
 		return;
 	}
-	if(key == 2)
+	if (key == 2)
 	{
 		return;
 	}
-	if(Long_Press())
+	if (Long_Press())
 	{
 		Control_SwitchMode();
 	}
@@ -433,13 +448,13 @@ void Key_Process(void)
 /* TIM2 main 5 ms loop: line inspection and PI always run; stop/run only selects output logic. */
 void TIM2_IRQHandler(void)
 {
-	if(TIM_GetITStatus(TIM2, TIM_IT_Update) != RESET)
+	if (TIM_GetITStatus(TIM2, TIM_IT_Update) != RESET)
 	{
 		int encoder_left;
 		int encoder_right;
 		TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
 
-//		H30_IMU_TIM_Callback();
+		//		H30_IMU_TIM_Callback();
 		Vision_Frequency_Update();
 		Key_Process();
 
@@ -451,7 +466,7 @@ void TIM2_IRQHandler(void)
 		MotorA.Motor_Pwm = Incremental_PI_Left(MotorA.Current_Encoder, MotorA.Target_Encoder);
 		MotorB.Motor_Pwm = Incremental_PI_Right(MotorB.Current_Encoder, MotorB.Target_Encoder);
 
-		if(Control_Work_Mode == CONTROL_MODE_SEARCH)
+		if (Control_Work_Mode == CONTROL_MODE_SEARCH)
 		{
 			Motor_SetPwm(0, 0);
 			vision_segment_gain = 0.4f;
@@ -464,29 +479,29 @@ void TIM2_IRQHandler(void)
 			search_scan_ticks = 0;
 			search_target_locked = 0;
 			Motor_SetPwm(LEFT_PWM_SIGN * (int)MotorA.Motor_Pwm,
-			             RIGHT_PWM_SIGN * (int)MotorB.Motor_Pwm);
+						 RIGHT_PWM_SIGN * (int)MotorB.Motor_Pwm);
 
 			vision_ff_yaw_cmd = 0.0f;
-			if(turn_cnt < 500 && turn_cnt >= 100)
+			if (turn_cnt < 500 && turn_cnt >= 100)
 			{
 				vision_segment_gain = 0.6f;
 				VISION_CENTER_X = 1;
 				VISION_CENTER_Y = 10;
 
-				if(CurrentRoadSegment == ROAD_SEG_AC)
+				if (CurrentRoadSegment == ROAD_SEG_AC)
 				{
 					vision_segment_gain = 0.3f;
 					VISION_CENTER_X = 3;
 					VISION_CENTER_Y = 7;
 				}
-				else if(CurrentRoadSegment == ROAD_SEG_CD)
+				else if (CurrentRoadSegment == ROAD_SEG_CD)
 				{
 					vision_segment_gain = 0.3f;
 					VISION_CENTER_X = 3;
 					VISION_CENTER_Y = 7;
 				}
 			}
-			else if(CurrentRoadSegment == ROAD_SEG_BA)
+			else if (CurrentRoadSegment == ROAD_SEG_BA)
 			{
 				float line_speed_x100;
 				vision_segment_gain = 0.8f;
@@ -494,15 +509,15 @@ void TIM2_IRQHandler(void)
 				VISION_CENTER_Y = 8;
 				line_speed_x100 = abs_float((MotorA.Current_Encoder + MotorB.Current_Encoder) * 0.5f) * 100.0f;
 				vision_ff_yaw_cmd = limit_float(-VISION_DIR_X * BA_VISION_FF * line_speed_x100,
-				                                  VISION_YAW_LIMIT_RPM, -VISION_YAW_LIMIT_RPM);
+												VISION_YAW_LIMIT_RPM, -VISION_YAW_LIMIT_RPM);
 			}
-			else if(CurrentRoadSegment == ROAD_SEG_AC)
+			else if (CurrentRoadSegment == ROAD_SEG_AC)
 			{
 				vision_segment_gain = AC_VISION_K;
 				VISION_CENTER_X = 4;
 				VISION_CENTER_Y = 4;
 			}
-			else if(CurrentRoadSegment == ROAD_SEG_CD)
+			else if (CurrentRoadSegment == ROAD_SEG_CD)
 			{
 				float line_speed_x100;
 				vision_segment_gain = CD_VISION_K;
@@ -510,9 +525,9 @@ void TIM2_IRQHandler(void)
 				VISION_CENTER_Y = 7;
 				line_speed_x100 = abs_float((MotorA.Current_Encoder + MotorB.Current_Encoder) * 0.5f) * 100.0f;
 				vision_ff_yaw_cmd = limit_float(VISION_DIR_X * CD_VISION_FF * line_speed_x100,
-				                                  VISION_YAW_LIMIT_RPM, -VISION_YAW_LIMIT_RPM);
+												VISION_YAW_LIMIT_RPM, -VISION_YAW_LIMIT_RPM);
 			}
-			else if(CurrentRoadSegment == ROAD_SEG_DB)
+			else if (CurrentRoadSegment == ROAD_SEG_DB)
 			{
 				vision_segment_gain = DB_VISION_K;
 				VISION_CENTER_X = 3;
@@ -520,7 +535,7 @@ void TIM2_IRQHandler(void)
 			}
 		}
 
-		if(Control_Work_Enable)
+		if (Control_Work_Enable)
 		{
 			Visual_Gimbal_Process(Control_Work_Mode);
 		}

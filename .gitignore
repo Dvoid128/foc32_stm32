@@ -1,0 +1,48 @@
+# Keil build output directories
+/OBJ/
+**/Objects/
+**/Listings/
+
+# Keil generated build files
+*.axf
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.o
+*.obj
+*.d
+*.dep
+*.crf
+*.htm
+*.build_log.htm
+
+# Keil per-user/session files
+*.uvgui.*
+*.uvguix.*
+*.uvproj.saved_uv4
+*.bak
+*.tmp
+
+# VS Code/Keil generated logs (keep shared configuration)
+.vscode/*.log
+.vscode/*.lock
+
+# Python/application build artifacts
+/dist/
+__pycache__/
+*.py[cod]
+
+# Extracted documentation images
+/_pdfimg/
+/_pdfimg_*.jpg
+
+# Local agent metadata
+/.agents/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~

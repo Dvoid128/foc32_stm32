@@ -1,0 +1,8 @@
+id: main
+name: findrect
+version: 1.0.0
+author: '11'
+icon: ''
+desc: '11'
+files:
+  - main.py
